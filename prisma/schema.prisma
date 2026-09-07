@@ -1,0 +1,199 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("BORROWER") // BORROWER, LENDER, ADMIN
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile             Profile?
+  transactions        Transaction[]
+  bahiScores          BahiScore[]
+  scoreHistories      ScoreHistory[]
+  creditApplications  CreditApplication[]
+  loans               Loan[]
+  repayments          Repayment[]
+  riskEvents          RiskEvent[]
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+model Profile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  occupation         String
+  businessName       String?
+  city               String
+  phone              String?
+  profileAgeDays     Int      @default(0)
+  coldStartStatus    String   @default("COLD_START") // COLD_START, BUILDING_PROFILE, ESTABLISHED
+  starterEligibility Float    @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        DateTime
+  description String
+  amount      Float
+  type        String   // INCOME, EXPENSE
+  category    String
+  balance     Float
+  referenceId String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, date])
+  @@map("transactions")
+}
+
+model BahiScore {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score               Int
+  consistencyScore    Int
+  recentActivityScore Int
+  incomeTrendScore    Int
+  cashBufferScore     Int
+  integrityScore      Int
+  grade               String   // EXCELLENT, GOOD, FAIR, CAUTION
+  coldStartStatus     String   // COLD_START, BUILDING_PROFILE, ESTABLISHED
+  historyLengthDays   Int
+  explanation         String?
+  calculatedAt        DateTime @default(now())
+
+  @@index([userId, calculatedAt])
+  @@map("bahi_scores")
+}
+
+model ScoreHistory {
+  id                    String   @id @default(cuid())
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  previousScore         Int
+  newScore              Int
+  scoreChange           Int
+  triggerReason         String   // TRANSACTIONS_IMPORTED, REPAYMENT_COMPLETED, SYSTEM_RECALCULATION
+  factorChangesJson     String?  // JSON string
+  eligibilityChangeJson String?  // JSON string
+  createdAt             DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("score_histories")
+}
+
+model CreditApplication {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestedAmount  Float
+  purpose          String
+  tenureWeeks      Int
+  status           String    @default("PENDING") // PENDING, UNDER_REVIEW, APPROVED, REJECTED
+  riskLevel        String    @default("MODERATE") // LOW, MODERATE, HIGH
+  recommendedLimit Float     @default(0)
+  lenderNotes      String?
+  reviewedBy       String?
+  reviewedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  loan             Loan?
+
+  @@index([userId, status])
+  @@map("credit_applications")
+}
+
+model Loan {
+  id                 String             @id @default(cuid())
+  applicationId      String             @unique
+  application        CreditApplication  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  principal          Float
+  interestFee        Float
+  totalPayable       Float
+  outstandingAmount  Float
+  tenureWeeks        Int
+  weeklyInstallment  Float
+  status             String             @default("ACTIVE") // ACTIVE, COMPLETED, DEFAULTED
+  disbursedAt        DateTime           @default(now())
+  dueDate            DateTime
+  completedAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  repayments         Repayment[]
+
+  @@index([userId, status])
+  @@map("loans")
+}
+
+model Repayment {
+  id                  String   @id @default(cuid())
+  loanId              String
+  loan                Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount              Float
+  paymentMethod       String   @default("UPI") // UPI, BANK_TRANSFER, CASH_COLLECTION
+  paymentReference    String
+  status              String   @default("COMPLETED") // COMPLETED, PENDING, FAILED
+  previousOutstanding Float
+  newOutstanding      Float
+  notes               String?
+  paidAt              DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  @@index([loanId, userId])
+  @@map("repayments")
+}
+
+model RiskEvent {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         String   // SUSPICIOUS_BURST, SYNTHETIC_REGULARITY, UNUSUAL_TIMING, REPEATED_AMOUNTS
+  severity     String   // LOW, MEDIUM, HIGH, CRITICAL
+  description  String
+  evidenceJson String?  // JSON string
+  isResolved   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([userId, severity])
+  @@map("risk_events")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  actorEmail   String
+  actorRole    String
+  action       String   // USER_REGISTERED, TRANSACTIONS_IMPORTED, SCORE_GENERATED, etc.
+  entity       String   // USER, TRANSACTION, APPLICATION, LOAN, REPAYMENT
+  entityId     String?
+  metadataJson String?  // JSON string
+  timestamp    DateTime @default(now())
+
+  @@index([actorEmail, action])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
